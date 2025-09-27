@@ -4,8 +4,10 @@ void main() {
   runApp(const MyApp());
 }
 
+// stateless static themes
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  const MyApp({super.key}); // widget can be function or class
+  // stateless and stateless widget are thre
 
   @override
   Widget build(BuildContext context) {
@@ -19,6 +21,8 @@ class MyApp extends StatelessWidget {
     );
   }
 }
+
+// stateful 
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key, required this.title});
