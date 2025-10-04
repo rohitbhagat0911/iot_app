@@ -1,0 +1,18 @@
+{
+  "[yaml]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "editor.formatOnSave": true,
+  "editor.formatOnSaveMode": "modifications",
+  "editor.codeActionsOnSave": {
+    "source.fixAll": true
+  },
+  "files.exclude": {
+    "pubspec.yaml": true
+  },
+  "settings": {
+    "pubspec.yaml": {
+      "editor.formatOnSave": false
+    }
+  }
+}
