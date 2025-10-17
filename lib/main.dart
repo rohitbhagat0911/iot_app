@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'dart:async';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -13,10 +15,10 @@ void main() async {
   runApp(const MyApp());
 }
 
-// stateless static themes
+final supabase = Supabase.instance.client;
+
 class MyApp extends StatelessWidget {
-  const MyApp({super.key}); // widget can be function or class
-  // stateless and stateless widget are thre
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -31,8 +33,6 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// stateful
-
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key, required this.title});
 
@@ -43,55 +43,187 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  final _notesStream =
-      Supabase.instance.client.from('notes').stream(primaryKey: ['id']);
+  String? _userId;
+  bool _isSignedIn = false;
+  String _statusMessage = 'Not signed in';
+  bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    supabase.auth.onAuthStateChange.listen((event) {
+      setState(() {
+        _userId = event.session?.user.id;
+        _isSignedIn = event.session != null;
+        if (_isSignedIn) {
+          _statusMessage = 'Successfully signed in';
+        }
+      });
+    });
+  }
+
+  Future<void> _signInWithGoogle() async {
+    setState(() {
+      _isLoading = true;
+      _statusMessage = 'Signing in...';
+    });
+
+    try {
+      const webClientId =
+          '351698344205-sib7nbt78viq1lbhhlli8foj8vcma4lg.apps.googleusercontent.com';
+      const iosClientId =
+          '351698344205-um6cmo203vt4omah5i60leaqov1dlb6a.apps.googleusercontent.com';
+
+      final GoogleSignIn signIn = GoogleSignIn.instance;
+
+      unawaited(signIn.initialize(
+          clientId: iosClientId, serverClientId: webClientId));
+
+      final googleAccount = await signIn.authenticate();
+
+      if (googleAccount == null) {
+        setState(() {
+          _statusMessage = 'Sign in canceled';
+          _isLoading = false;
+        });
+        return;
+      }
+
+      final googleAuthorization =
+          await googleAccount.authorizationClient.authorizationForScopes([]);
+      final googleAuthentication = googleAccount.authentication;
+      final idToken = googleAuthentication.idToken;
+      final accessToken = googleAuthorization?.accessToken;
+
+      if (idToken == null || accessToken == null) {
+        setState(() {
+          _statusMessage = 'Sign in failed: Missing tokens';
+          _isLoading = false;
+        });
+        return;
+      }
+
+      await supabase.auth.signInWithIdToken(
+        provider: OAuthProvider.google,
+        idToken: idToken,
+        accessToken: accessToken,
+      );
+
+      setState(() {
+        _isLoading = false;
+      });
+    } on GoogleSignInException catch (e) {
+      setState(() {
+        _isLoading = false;
+        if (e.code == GoogleSignInExceptionCode.canceled) {
+          _statusMessage = 'Authentication canceled';
+        } else {
+          _statusMessage = 'Authentication error: ${e.toString()}';
+        }
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _statusMessage = 'Authentication failed: $e';
+      });
+    }
+  }
+
+  Future<void> _signOut() async {
+    await supabase.auth.signOut();
+    await GoogleSignIn.instance.signOut();
+    setState(() {
+      _statusMessage = 'Signed out';
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        title: Text(widget.title),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: const Text('My Notes'),
       ),
-      body: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: _notesStream,
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final notes = snapshot.data!;
-          return ListView.builder(
-              itemCount: notes.length,
-              itemBuilder: (context, index) {
-                return ListTile(
-                  title: Text(notes[index]['body']),
-                );
-              });
-        },
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          showDialog(
-            context: context,
-            builder: (context) {
-              return SimpleDialog(
-                title: const Text('Add a Note'),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 20),
-                children: [
-                  TextFormField(
-                    onFieldSubmitted: (value) async {
-                      await Supabase.instance.client
-                          .from('notes')
-                          .insert({'body': value});
-                      Navigator.of(context).pop();
-                    },
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Icon(
+                _isSignedIn ? Icons.check_circle : Icons.account_circle,
+                size: 80,
+                color: _isSignedIn ? Colors.green : Colors.grey,
+              ),
+              const SizedBox(height: 24),
+              if (_userId != null)
+                Text(
+                  'User ID: $_userId',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  textAlign: TextAlign.center,
+                )
+              else
+                const Text(
+                  'No user signed in',
+                  style: TextStyle(fontSize: 16, color: Colors.grey),
+                ),
+              const SizedBox(height: 16),
+              Text(
+                _statusMessage,
+                style: TextStyle(
+                  color: _isSignedIn
+                      ? Colors.green
+                      : _statusMessage.contains('canceled')
+                          ? Colors.orange
+                          : _statusMessage.contains('failed') ||
+                                  _statusMessage.contains('error')
+                              ? Colors.red
+                              : Colors.grey,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 32),
+              if (!_isSignedIn)
+                Column(
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: _isLoading ? null : _signInWithGoogle,
+                      icon: _isLoading
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.login),
+                      label: const Text('Continue with Google'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 24, vertical: 12),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Sign in or sign up using your Google account',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                )
+              else
+                ElevatedButton.icon(
+                  onPressed: _signOut,
+                  icon: const Icon(Icons.logout),
+                  label: const Text('Sign Out'),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 12),
                   ),
-                ],
-              );
-            },
-          );
-        },
-        child: const Icon(Icons.add),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
